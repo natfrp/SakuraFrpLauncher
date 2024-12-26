@@ -248,6 +248,9 @@ begin
 		Result := Result + MemoTasksInfo + Newline + NewLine;
 end;
 
+procedure ExitProcess(exitCode: Integer);
+	external 'ExitProcess@kernel32.dll stdcall';
+
 function NextButtonClick(const CurPageID: Integer): Boolean;
 var
 	retry: Boolean;
@@ -264,6 +267,7 @@ begin
 				if (SuppressibleMsgBox('检测到您禁用了 Windows 安全中心服务，这可能造成无法正确写入排除项，并导致 frpc 被删除'+#13#10+'如果您希望自动进行修复并重启，请点击"确定"，否则点击"取消"。自动修复将启用 Windows 安全中心服务'+#13#10#13#10+'【点击确定后电脑会重启，请先保存所有未保存的文件】'+#13#10+'【点击确定后电脑会重启，请先保存所有未保存的文件】'+#13#10+'【点击确定后电脑会重启，请先保存所有未保存的文件】', mbError, MB_OKCANCEL, IDCANCEL) = IDOK) then begin
 					RegWriteDWordValue(HKLM, 'SYSTEM\CurrentControlSet\Services\SecurityHealthService', 'Start', 2);
 					Exec('>', 'shutdown /r /t 3 /c "即将重启以启用安全中心服务"', '', SW_SHOWNORMAL, ewWaitUntilTerminated, retCode);
+					ExitProcess(0);
 				end;
 			end;
 		end;
