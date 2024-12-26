@@ -251,9 +251,22 @@ end;
 function NextButtonClick(const CurPageID: Integer): Boolean;
 var
 	retry: Boolean;
+	regVal: Cardinal;
+	retCode: Integer;
 begin
 	Result := True;
 	if (CurPageID = wpSelectComponents) then begin
+		if WizardIsComponentSelected('wd_exclusion') then begin
+			if ((RegQueryDWordValue(HKLM, 'SOFTWARE\Policies\Microsoft\Windows Defender', 'DisableLocalAdminMerge', regVal)) and (regVal = 1)) then begin
+				RegWriteDWordValue(HKLM, 'SOFTWARE\Policies\Microsoft\Windows Defender', 'DisableLocalAdminMerge', 0);
+			end;
+			if ((RegQueryDWordValue(HKLM, 'SYSTEM\CurrentControlSet\Services\SecurityHealthService', 'Start', regVal)) and (regVal = 4)) then begin
+				if (SuppressibleMsgBox('检测到您禁用了 Windows 安全中心服务，这可能造成无法正确写入排除项，使 SakuraFrp 出现组件消失的问题'+#13#10+'如果您希望修复并*重启电脑*，请点击"确定"，否则点击"取消"', mbError, MB_OKCANCEL, IDCANCEL) = IDOK) then begin
+					RegWriteDWordValue(HKLM, 'SYSTEM\CurrentControlSet\Services\SecurityHealthService', 'Start', 2);
+					Exec('>', 'shutdown /r /t 3 /c "即将重启以启用安全中心服务"', '', SW_SHOWNORMAL, ewWaitUntilTerminated, retCode);
+				end;
+			end;
+		end;
 		if not WizardIsComponentSelected('launcher_ui') then begin
 			if WizardIsComponentSelected('launcher\service\webui') then
 				Result := SuppressibleMsgBox('您选择了不使用原生界面、只启用 Web UI, Web UI 仅推荐高级用户使用'+#13#10+'请确认您理解此选择的含义和 Web UI 的配置方法, 否则请勾选一个 "用户界面"', mbError, MB_OKCANCEL, IDCANCEL) = IDOK
