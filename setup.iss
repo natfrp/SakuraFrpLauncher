@@ -7,12 +7,6 @@
 #define LibraryNameNet ".NET Framework 4.8"
 #define LibraryNameWebView2 "Microsoft Edge WebView2 Runtime"
 
-#define Sha256Net "0bba3094588c4bfec301939985222a20b340bf03431563dec8b2b4478b06fffa"
-#define DownloadUrlNet "https://download.visualstudio.microsoft.com/download/pr/2d6bb6b2-226a-4baa-bdec-798822606ff1/9b7b8746971ed51a1770ae4293618187/ndp48-web.exe"
-
-#define Sha256WebView2 "5b01d964ced28c1ff850b4de05a71f386addd815a30c4a9ee210ef90619df58e"
-#define DownloadUrlWebView2 "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/27b4fd83-937a-4e70-8ee5-c881502ea90e/MicrosoftEdgeWebview2Setup.exe"
-
 [Setup]
 ; Basics
 AppId=SakuraFrpLauncher
@@ -177,12 +171,12 @@ end;
 
 function CompareVersion(const v1, v2: String): Integer;
 var
-    pv1, pv2: Int64;
+	pv1, pv2: Int64;
 begin
-    if not StrToVersion(v1, pv1) then pv1 := 0;
-    if not StrToVersion(v2, pv2) then pv2 := 0;
+	if not StrToVersion(v1, pv1) then pv1 := 0;
+	if not StrToVersion(v2, pv2) then pv2 := 0;
 
-    Result := ComparePackedVersion(pv1, pv2);
+	Result := ComparePackedVersion(pv1, pv2);
 end;
 
 //// Install Events ///////////////////////////////////////////
@@ -197,12 +191,12 @@ begin
 
 	installNet := (not RegQueryDWordValue(HKLM, 'SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full', 'Release', version)) or (version < 528040);
 
-    { WebView2: https://stackoverflow.com/questions/72331206/detecting-if-webview2-runtime-is-installed-with-inno-setup }
-    verifyWebView2 := false;
-    if (IsWin64) then
+	{ WebView2: https://stackoverflow.com/questions/72331206/detecting-if-webview2-runtime-is-installed-with-inno-setup }
+	verifyWebView2 := false;
+	if (IsWin64) then
 	begin
-        if (RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', versionStr)) then
-            verifyWebView2 := true;
+		if (RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', versionStr)) then
+			verifyWebView2 := true;
 	end	else if (RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', versionStr)) then
 		verifyWebView2 := true;
 
@@ -251,11 +245,37 @@ end;
 procedure ExitProcess(exitCode: Integer);
 	external 'ExitProcess@kernel32.dll stdcall';
 
+function Explode(Text: String; Separator: String): TArrayOfString;
+var
+	i, p: Integer;
+begin
+	i := 0;
+	repeat
+		SetArrayLength(Result, i + 1);
+		p := Pos(Separator, Text);
+		if p > 0 then begin
+			Result[i] := Copy(Text, 1, p - 1);
+			Text := Copy(Text, p + Length(Separator), Length(Text));
+			i := i + 1;
+		end else begin
+			Result[i] := Text;
+			Text := '';
+		end;
+	until Length(Text) = 0;
+end;
+
 function NextButtonClick(const CurPageID: Integer): Boolean;
 var
 	retry: Boolean;
 	regVal: Cardinal;
 	retCode: Integer;
+
+	winHttpReq: Variant;
+	links: TArrayOfString;
+	i: Integer;
+
+	dotnet48Found: Boolean;
+	webview2Found: Boolean;
 begin
 	Result := True;
 	if (CurPageID = wpSelectComponents) then begin
@@ -280,15 +300,53 @@ begin
 			end;
 		end;
 	end else if (CurPageID = wpReady) and WizardIsComponentSelected('launcher_ui') and (installNet or installWebView2) then begin
-		downloadPage.Show;
+		winHttpReq := CreateOleObject('WinHttp.WinHttpRequest.5.1');
+		winHttpReq.Open('GET', 'https://nya.globalslb.net/natfrp/client/launcher-windows/runtime.txt', False);
+		winHttpReq.Send;
+
+		if winHttpReq.Status <> 200 then begin
+			SuppressibleMsgBox('无法获取运行时下载链接，请检查网络连接', mbError, MB_OK, IDOK);
+			Result := False;
+			Exit;
+		end;
+
 		downloadPage.Clear;
 
-		if installNet then
-			downloadPage.Add('{#DownloadUrlNet}', 'dotnet.exe', '{#Sha256Net}');
+		links := Explode(winHttpReq.ResponseText, #10);
+		i := 0;
+		while i < GetArrayLength(links) do begin
+			case links[i] of
+				'{#LibraryNameNet}': begin
+					if Pos('https://download.visualstudio.microsoft.com/', links[i + 1]) <> 1 then begin
+						SuppressibleMsgBox('获取到的 .NET Framework 4.8 下载链接无效, 请尝试重新下载安装包或联系我们' + #13#10 + links[i + 1], mbError, MB_OK, IDOK);
+						Result := False;
+						Exit;
+					end;
+					if installNet then
+						downloadPage.Add(links[i + 1], 'dotnet.exe', links[i + 2]);
+					dotnet48Found := True;
+				end;
+				'{#LibraryNameWebView2}': begin
+					if Pos('https://msedge.sf.dl.delivery.mp.microsoft.com/', links[i + 1]) <> 1 then begin
+						SuppressibleMsgBox('获取到的 WebView2 下载链接无效, 请尝试重新下载安装包或联系我们' + #13#10#13#10 + links[i + 1], mbError, MB_OK, IDOK);
+						Result := False;
+						Exit;
+					end;
+					if installWebView2 then
+						downloadPage.Add(links[i + 1], 'MicrosoftEdgeWebview2Setup.exe', links[i + 2]);
+					webview2Found := True;
+				end;
+			end;
+			i := i + 4;
+		end;
 
-		if installWebView2 then
-			downloadPage.Add('{#DownloadUrlWebView2}', 'MicrosoftEdgeWebview2Setup.exe', '{#Sha256WebView2}');
+		if (installNet and not dotnet48Found) or (installWebView2 and not webview2Found) then begin
+			SuppressibleMsgBox('无法获取部分组件的下载链接, 请检查网络连接、尝试重新下载安装包或联系我们' + #13#10#13#10 + winHttpReq.ResponseText, mbError, MB_OK, IDOK);
+			Result := False;
+			Exit;
+		end;
 
+		downloadPage.Show;
 		try
 			retry := True;
 			while retry do begin
@@ -336,10 +394,10 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
 	if (CurUninstallStep = usPostUninstall) and (MsgBox('是否删除启动器配置文件? 下列文件夹将会被删除: '
-		+#13#10+'    %LocalAppData%\SakuraLauncher'
-		+#13#10+'    %LocalAppData%\LegacyLauncher'
-		+#13#10+'    %LocalAppData%\SakuraFrpService'
-		+#13#10+'    %ProgramData%\SakuraFrpService', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES) then
+		+#13#10+'	%LocalAppData%\SakuraLauncher'
+		+#13#10+'	%LocalAppData%\LegacyLauncher'
+		+#13#10+'	%LocalAppData%\SakuraFrpService'
+		+#13#10+'	%ProgramData%\SakuraFrpService', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES) then
 	begin
 		DelTree(ExpandConstant('{localappdata}\SakuraLauncher'), True, True, True);
 		DelTree(ExpandConstant('{localappdata}\LegacyLauncher'), True, True, True);
